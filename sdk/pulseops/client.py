@@ -1,5 +1,11 @@
 from __future__ import annotations
+
+import atexit
+
+from pulseops.buffer import BatchBuffer
 from pulseops.config import PulseOpsConfig
+from pulseops.shipper import BatchShipper
+from pulseops.wrapper import WrappedOpenAIClient
 
 
 class PulseOps:
@@ -24,15 +30,31 @@ class PulseOps:
             debug=debug,
             register_shutdown_hook=register_shutdown_hook,
         )
+        self._shipper = BatchShipper(
+            base_url=base_url,
+            project_key=api_key,
+            timeout_sec=timeout_sec,
+        )
+        self._buffer = BatchBuffer(
+            shipper=self._shipper,
+            max_size=batch_size,
+            flush_interval_sec=flush_interval_sec,
+        )
+        if register_shutdown_hook:
+            atexit.register(self.shutdown)
 
-    def wrap(self, client: object) -> object:
-        raise NotImplementedError("SDK wrapping implemented in Phase 2")
+    def wrap(self, client: object) -> WrappedOpenAIClient:
+        return WrappedOpenAIClient(
+            underlying=client,
+            config=self.config,
+            buffer=self._buffer,
+        )
 
     def flush(self) -> None:
-        pass
+        self._buffer.flush()
 
     def shutdown(self) -> None:
-        pass
+        self._buffer.stop()
 
     def stats(self) -> dict[str, int]:
-        return {"events_logged": 0, "events_dropped": 0, "flush_count": 0}
+        return self._buffer.stats()
